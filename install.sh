@@ -3,6 +3,7 @@
 set -eu
 
 NIXOS_BASE="/mnt/etc/nixos"
+INSTALLER_TZ="Australia/Sydey"
 
 partition() {
   local target_device=$1
@@ -15,9 +16,12 @@ EOF
   sed -e 's/\s*\([\+0-9a-zA-Z]*\).*/\1/' << EOF | fdisk "${target_device}"
   n # new partition
   p # primary partition
-  1 # partition number 1
+  2
     # default - start at beginning of disk 
   +100M
+  t # change partition type
+  2
+  1 # EFI
   n # new partition
   e # extended partition
   3 # partition 3
@@ -28,7 +32,7 @@ EOF
   19 # linux swap (not 82)
   n # new partition
   p # primary partition
-  2 # partion number 2
+  1
     # default, start immediately after preceding partition
     # default, extend partition to end of disk
   x # expert options
@@ -45,9 +49,12 @@ prepare_disks() {
 
   partition "${target_device}"
   mkfs.ext4 -L nixos "${target_device}1"
+  #mkfs.fat -F32 -n BOOT "${target_device}2"
   mkswap "${target_device}3"
 
   mount "${target_device}1" /mnt
+  #mkdir -p /mnt/boot
+  mount "${target_device}2" /mnt/boot
   swapon "${target_device}3"
 }
 
@@ -67,9 +74,16 @@ generate_config() {
     ./hardware-configuration.nix
   ];
 
-  boot.loader.grub.device = "${target_device}";
-  boot.loader.grub.enable = true;
-  boot.loader.grub.version = 2;
+  # Allow non free drivers and software
+  nixpkgs.config.allowUnfree = true;
+  nixpkgs.config.allowUnfreeRedistributable = true;
+
+  boot.loader.systemd-boot.enable = true;
+  # boot.loader.grub.device = "${target_device}";
+  # boot.loader.grub.enable = true;
+  # boot.loader.grub.version = 2;
+
+  time.timeZone = "${INSTALLER_TZ}";
 
   system.stateVersion = "18.03";
 }
@@ -82,6 +96,7 @@ EOF
 reset_machine() {
   local target_device=$1
 
+  umount /mnt/boot 2>/dev/null || true
   umount /mnt 2>/dev/null || true
   swapoff "${target_device}3" 2>/dev/null || true
 }
